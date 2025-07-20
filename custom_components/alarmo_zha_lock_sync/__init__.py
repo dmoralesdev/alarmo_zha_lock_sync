@@ -1,20 +1,18 @@
-"""Alarmo ↔ ZHA lock user code synchronization."""
+"""Alarmo ↔ ZHA lock user code sync using front-end PIN capture."""
 from __future__ import annotations
-
 import asyncio
-import importlib
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict
 
-from homeassistant.const import EVENT_CALL_SERVICE
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import EVENT_CALL_SERVICE
 from homeassistant.helpers import storage
-from homeassistant.setup import async_when_setup
 from homeassistant.config_entries import ConfigEntry
 
 from .const import DOMAIN, STORAGE_VERSION, STORAGE_KEY
 
 _LOGGER = logging.getLogger(__name__)
+MAX_SLOTS = 50  # adjust if your lock supports fewer
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
@@ -29,7 +27,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     def _next_free_slot() -> int:
         used = set(mapping.values())
-        for slot in range(1, 255):
+        for slot in range(1, MAX_SLOTS + 1):
             if slot not in used:
                 return slot
         raise ValueError("No free lock slots")
@@ -43,7 +41,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 {"entity_id": lock_entity, "code_slot": slot, "user_code": code},
                 blocking=True,
             )
-            _LOGGER.info("Synced %s to slot %s", name, slot)
+            _LOGGER.info("Synced PIN for %s to slot %s", name, slot)
         except Exception as err:
             _LOGGER.warning("Failed syncing %s: %s", name, err)
             hass.async_create_task(
@@ -54,8 +52,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         "title": "Alarmo ↔ ZHA Lock Sync",
                         "message": (
                             f"Could not write code for {name} to {lock_entity}: "
-                            f"Payload: [entity_id: {lock_entity}, code_slot: {slot}, user_code: {code}]. "
-                            f"Error: {err}"
+                            f"[slot {slot}] Error: {err}"
                         ),
                     },
                 )
@@ -64,55 +61,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def _clear_code(name: str, slot: int) -> None:
         try:
             await hass.services.async_call(
-                "zha",
-                "clear_lock_user_code",
+                "zha", "clear_lock_user_code",
                 {"entity_id": lock_entity, "code_slot": slot},
                 blocking=True,
             )
             _LOGGER.info("Cleared slot %s for %s", slot, name)
         except Exception as err:
-            _LOGGER.warning("Failed clearing %s: %s", name, err)
+            _LOGGER.warning("Failed clearing code for %s: %s", name, err)
 
-    # ---------------------------------------------------------------
-    # Patch AlarmoStorage.async_create_user
-    # ---------------------------------------------------------------
-    async def _patch_storage(hass: HomeAssistant, _component) -> None:
-        store_mod = await hass.async_add_executor_job(
-            importlib.import_module,
-            "custom_components.alarmo.store",
-        )
-        StorageCls = getattr(store_mod, "AlarmoStorage", None)
-        if StorageCls is None:
-            _LOGGER.error("AlarmoStorage class not found; creation sync disabled")
-            return
-
-        if getattr(StorageCls, "_zha_sync_patched", False):
-            return
-
-        original_fn = StorageCls.async_create_user
-
-        def patched(self, data: dict) -> Any:  # synchronous method
-            plain_code = data.get("code")
-            plain_name = data.get("name", "")
-            result = original_fn(self, data)
-            if plain_code:
-                slot = mapping.get(plain_name) or _next_free_slot()
-                mapping[plain_name] = slot
-                _persist()
-                hass.async_create_task(_push_code(plain_name, plain_code, slot))
-            return result
-
-        StorageCls.async_create_user = patched
-        StorageCls._zha_sync_patched = True
-        _LOGGER.info("Patched AlarmoStorage.async_create_user")
-
-    async_when_setup(hass, "alarmo", _patch_storage)
-
-    # ---------------------------------------------------------------
-    # Listen for enable/disable user services
-    # ---------------------------------------------------------------
+    # listen for custom event sent by front‑end
     @callback
-    async def _handle_alarmo_service(event):
+    async def _handle_plain_pin(event):
+        name = event.data.get("name")
+        pin = event.data.get("pin")
+        if not (name and pin):
+            return
+        slot = mapping.get(name) or _next_free_slot()
+        mapping[name] = slot
+        _persist()
+        await _push_code(name, pin, slot)
+    hass.bus.async_listen("alarmo_plain_pin", _handle_plain_pin)
+
+    # Still handle enable/disable if code shown
+    @callback
+    async def _handle_service(event):
         if event.data.get("domain") != "alarmo":
             return
         svc = event.data.get("service")
@@ -120,16 +92,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         name = data.get("name")
         if not name:
             return
-        if svc == "enable_user" and (code := data.get("code")):
-            slot = mapping.get(name) or _next_free_slot()
-            mapping[name] = slot
-            _persist()
-            await _push_code(name, code, slot)
-        elif svc == "disable_user":
+        if svc == "disable_user":
             if (slot := mapping.get(name)):
                 await _clear_code(name, slot)
-
-    remove_listener = hass.bus.async_listen(EVENT_CALL_SERVICE, _handle_alarmo_service)
+    remove_listener = hass.bus.async_listen(EVENT_CALL_SERVICE, _handle_service)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = remove_listener
     return True
 

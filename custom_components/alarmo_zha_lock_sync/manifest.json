@@ -1,7 +1,7 @@
 {
   "domain": "alarmo_zha_lock_sync",
   "name": "Alarmo ZHA Lock Sync",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "documentation": "https://github.com/yourrepo/alarmo_zha_lock_sync",
   "requirements": [],
   "dependencies": [

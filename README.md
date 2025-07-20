@@ -1,3 +1,2 @@
 # Alarmo ZHA Lock Sync
-
-See custom_components/alarmo_zha_lock_sync/README.md
+Version 0.9.0 - Frontend PIN capture
