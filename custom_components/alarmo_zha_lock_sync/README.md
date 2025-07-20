@@ -12,5 +12,6 @@ Synchronize Alarmo users with a Zigbee lock via ZHA.
 * Enhanced UserManager discovery: tries sys.modules, direct import, and Alarmo coordinator in hass.data.
 * Ensures creation sync works with latest Alarmo releases.
 
-## v0.7.0
-* Patch AlarmoStorage.async_create_user directly to capture plaintext PIN.
+## v0.7.1
+* Capture plaintext PIN by patching `AlarmoCoordinator.async_update_user_config` before hashing.
+* Adds rate‑limit and detailed payload in notifications.
