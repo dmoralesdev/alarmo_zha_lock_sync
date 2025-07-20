@@ -3,6 +3,6 @@
   "domain": "alarmo_zha_lock_sync",
   "type": "integration",
   "zip_release": false,
-  "render_readme": true,
-  "content_in_root": false
+  "content_in_root": false,
+  "render_readme": true
 }
