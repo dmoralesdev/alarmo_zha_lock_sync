@@ -1,15 +1,14 @@
 {
   "domain": "alarmo_zha_lock_sync",
   "name": "Alarmo ZHA Lock Sync",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "documentation": "https://github.com/yourrepo/alarmo_zha_lock_sync",
   "requirements": [],
   "dependencies": [
     "alarmo"
   ],
-  "config_flow": true,
   "codeowners": [
     "@dmoralesdev"
   ],
-  "iot_class": "local_push"
+  "config_flow": true
 }

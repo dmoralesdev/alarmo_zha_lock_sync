@@ -1,43 +1,27 @@
-// Injected script to grab plaintext PIN from Alarmo user dialog
-(function() {
+(function () {
   const waitForHass = () =>
-    new Promise(resolve => {
-      if (window.hassConnection && window.hassConnection.then) {
-        window.hassConnection.then(({conn}) => resolve(conn));
-      } else if (window.hass) {
-        resolve(window.hass);
-      } else {
-        setTimeout(() => resolve(waitForHass()), 500);
-      }
+    new Promise((res) => {
+      if (window.hass) res();
+      else window.addEventListener("hass-done", () => res(), { once: true });
     });
 
-  const inject = () => {
-    if (window.__alarmo_pin_hook_installed) return;
-    window.__alarmo_pin_hook_installed = true;
+  waitForHass().then(() => {
+    if (!window.hashCode) return;
+    const orig = window.hashCode;
 
-    const origHashCode = window.hashCode;
-    window.hashCode = async function(pin) {
-      try {
-        const el = document.querySelector("alarmo-user-editor");
-        const nameInput = el && el.shadowRoot.querySelector("mwc-textfield");
-        const name = nameInput ? nameInput.value : "";
-        const conn = await waitForHass();
-        conn.sendMessage({
-          type: "fire_event",
-          event_type: "alarmo_plain_pin",
-          event_data: { name: name || "Unknown", pin }
-        });
-      } catch (e) {
-        console.error("PIN hook error", e);
-      }
-      return origHashCode(pin);
+    window.hashCode = async (pin) => {
+      const nameInput =
+        document.querySelector('mwc-textfield[name="name"]') ||
+        document.querySelector('ha-textfield[name="name"]');
+      const name = nameInput ? nameInput.value : "";
+
+      window.hass.connection.sendMessage({
+        type: "fire_event",
+        event_type: "alarmo_plain_pin",
+        event_data: { name, pin },
+      });
+
+      return orig(pin);
     };
-    console.log("Alarmo PIN hook installed");
-  };
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", inject);
-  } else {
-    inject();
-  }
+  });
 })();
