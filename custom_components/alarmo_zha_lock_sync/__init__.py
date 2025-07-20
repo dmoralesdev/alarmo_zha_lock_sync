@@ -51,7 +51,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     "create",
                     {
                         "title": "Alarmo ↔ ZHA Lock Sync",
-                        "message": f"Could not write code for {name} to {lock_entity}: {err}",
+                        "message": f"Could not write code for {name} to {lock_entity}: Payload: [entity_id: {lock_entity}, code_slot: {slot}, user_code: {code}]. Error: {err}",
                     },
                 )
             )
