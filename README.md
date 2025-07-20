@@ -1,0 +1,1 @@
+# alarmo_zha_lock_sync
