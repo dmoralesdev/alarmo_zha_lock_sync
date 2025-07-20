@@ -4,10 +4,9 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
-import sys
 from typing import Dict, Any, Optional
 
-from homeassistant.const import EVENT_CALL_SERVICE, ATTR_CODE, ATTR_NAME
+from homeassistant.const import EVENT_CALL_SERVICE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import storage
 from homeassistant.setup import async_when_setup
@@ -37,7 +36,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def _push_code(name: str, code: str, slot: int) -> None:
         try:
-            # lock cluster often needs a short pause between writes
             await asyncio.sleep(0.3)
             await hass.services.async_call(
                 "zha",
@@ -45,8 +43,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 {"entity_id": lock_entity, "code_slot": slot, "user_code": code},
                 blocking=True,
             )
-            _LOGGER.debug("Synced %s to slot %s", name, slot)
-        except Exception as err:  # noqa: BLE001
+            _LOGGER.info("Synced %s to slot %s", name, slot)
+        except Exception as err:
             _LOGGER.warning("Failed syncing %s: %s", name, err)
             hass.async_create_task(
                 hass.services.async_call(
@@ -71,34 +69,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 {"entity_id": lock_entity, "code_slot": slot},
                 blocking=True,
             )
-            _LOGGER.debug("Cleared slot %s for %s", slot, name)
-        except Exception as err:  # noqa: BLE001
+            _LOGGER.info("Cleared slot %s for %s", slot, name)
+        except Exception as err:
             _LOGGER.warning("Failed clearing %s: %s", name, err)
 
     # ---------------------------------------------------------------
-    # Patch AlarmoCoordinator.async_update_user_config
+    # Patch AlarmoStorage.async_create_user
     # ---------------------------------------------------------------
-    async def _patch_alarmocoordinator(hass: HomeAssistant, _component):
-        try:
-            alarmo_init = importlib.import_module("custom_components.alarmo.__init__")
-        except ModuleNotFoundError:
-            _LOGGER.error("Alarmo module not found; cannot patch creation step")
+    async def _patch_storage(hass: HomeAssistant, _component) -> None:
+        store_mod = await hass.async_add_executor_job(
+            importlib.import_module,
+            "custom_components.alarmo.store",
+        )
+        StorageCls = getattr(store_mod, "AlarmoStorage", None)
+        if StorageCls is None:
+            _LOGGER.error("AlarmoStorage class not found; creation sync disabled")
             return
 
-        Coordinator = getattr(alarmo_init, "AlarmoCoordinator", None)
-        if Coordinator is None:
-            _LOGGER.error("AlarmoCoordinator class missing; creation sync disabled")
+        if getattr(StorageCls, "_zha_sync_patched", False):
             return
 
-        if hasattr(Coordinator, "_zha_sync_patched"):
-            return  # already patched
+        original_fn = StorageCls.async_create_user
 
-        original_fn = Coordinator.async_update_user_config
-
-        def patched(self, user_id: str = None, data: dict = {}):  # type: ignore[override]
-            plain_code = data.get(ATTR_CODE)
-            plain_name = data.get(ATTR_NAME) or ""
-            result = original_fn(self, user_id, data)  # execute original logic (hashing etc.)
+        def patched(self, data: dict) -> Any:  # synchronous method
+            plain_code = data.get("code")
+            plain_name = data.get("name", "")
+            result = original_fn(self, data)
             if plain_code:
                 slot = mapping.get(plain_name) or _next_free_slot()
                 mapping[plain_name] = slot
@@ -106,14 +102,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.async_create_task(_push_code(plain_name, plain_code, slot))
             return result
 
-        Coordinator.async_update_user_config = patched  # type: ignore[assignment]
-        Coordinator._zha_sync_patched = True
-        _LOGGER.info("Patched AlarmoCoordinator.async_update_user_config")
+        StorageCls.async_create_user = patched
+        StorageCls._zha_sync_patched = True
+        _LOGGER.info("Patched AlarmoStorage.async_create_user")
 
-    async_when_setup(hass, "alarmo", _patch_alarmocoordinator)
+    async_when_setup(hass, "alarmo", _patch_storage)
 
     # ---------------------------------------------------------------
-    # Listen for enable/disable services
+    # Listen for enable/disable user services
     # ---------------------------------------------------------------
     @callback
     async def _handle_alarmo_service(event):

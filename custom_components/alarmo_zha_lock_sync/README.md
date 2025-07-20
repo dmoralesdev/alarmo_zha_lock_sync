@@ -15,3 +15,7 @@ Synchronize Alarmo users with a Zigbee lock via ZHA.
 ## v0.7.1
 * Capture plaintext PIN by patching `AlarmoCoordinator.async_update_user_config` before hashing.
 * Adds rate‑limit and detailed payload in notifications.
+
+## v0.8.0
+* Patches `AlarmoStorage.async_create_user` using executor to avoid blocking call.
+* Removes import inside event loop warning and ensures plaintext PIN capture.
