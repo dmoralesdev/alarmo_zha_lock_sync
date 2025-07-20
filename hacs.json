@@ -1,0 +1,7 @@
+{
+  "name": "Alarmo ZHA Lock Sync",
+  "domain": "alarmo_zha_lock_sync",
+  "type": "integration",
+  "zip_release": true,
+  "render_readme": true
+}
